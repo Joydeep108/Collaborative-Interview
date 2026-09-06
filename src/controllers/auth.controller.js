@@ -6,7 +6,6 @@ import { signupSchema } from "../validators/auth.validator.js";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import crypto from 'crypto';
-import { access } from "fs";
 
 
 export const signup = async (req, res) => {

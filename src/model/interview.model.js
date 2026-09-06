@@ -1,7 +1,4 @@
-import mongoose, {model, Schema} from "mongoose";
-import CandidateModel from "./candidate.model";
-import InterviewerModel from "./interviewer.model";
-import InterviewRoomModel from "./room.model";
+import {model, Schema} from "mongoose";
 
 const interviewSchema = new Schema({
     candidateId: {

@@ -53,8 +53,8 @@ const authMiddleware = async (req, res, next) => {
 
         req.jwtPayload = { ...jwtPayload};
 
-        // next();
-        res.send("Hi, deployment is successfull");
+        next();
+        // res.send("Hi, deployment is successfull");
     
 
     } catch(err) {
