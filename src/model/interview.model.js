@@ -38,6 +38,14 @@ const interviewSchema = new Schema({
         max: 480,
     },
 
+    startedAt: {
+        type: Date,
+    },
+
+    endedAt: {
+        type: Date,
+    },
+
     status: {
         type: String,
         enum: [

@@ -28,5 +28,10 @@ const interviewRoomSchema = new Schema({
 
 }, { timestamps: true });
 
+// interviewRoomSchema.index(
+//     {roomCode: 1, interviewId: 1},
+//     {unique: true}
+// )
+
 const InterviewRoomModel = model("InterviewRoom", interviewRoomSchema);
 export default InterviewRoomModel;
