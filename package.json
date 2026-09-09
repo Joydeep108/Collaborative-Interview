@@ -19,6 +19,7 @@
     "express-useragent": "^2.2.3",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.9.4",
+    "socket.io": "^4.8.3",
     "zod": "^4.5.4"
   }
 }
