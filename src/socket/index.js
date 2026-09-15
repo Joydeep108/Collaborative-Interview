@@ -115,6 +115,39 @@ export const initializeSocket = (io) => {
       io.to(`interview:${roomCode}`).emit("receive_message", messagePayload);
     });
 
+    // --- WebRTC Signaling Events ---
+
+    // 1. Forward WebRTC Offer to the peer in the room
+    socket.on("webrtc_offer", ({ roomCode, sdp }) => {
+      socket.to(`interview:${roomCode}`).emit("webrtc_offer", {
+        sdp,
+        senderId: socket.user.id
+      });
+    });
+
+    // 2. Forward WebRTC Answer back to the caller
+    socket.on("webrtc_answer", ({ roomCode, sdp }) => {
+      socket.to(`interview:${roomCode}`).emit("webrtc_answer", {
+        sdp,
+        senderId: socket.user.id
+      });
+    });
+
+    // 3. Exchange ICE Candidates (STUN / TURN route probing)
+    socket.on("webrtc_ice_candidate", ({ roomCode, candidate }) => {
+      socket.to(`interview:${roomCode}`).emit("webrtc_ice_candidate", {
+        candidate,
+        senderId: socket.user.id
+      });
+    });
+
+    // 4. Hang up / Leave call notification
+    socket.on("leave_call", ({ roomCode }) => {
+      socket.to(`interview:${roomCode}`).emit("peer_left", {
+        userId: socket.user.id
+      });
+    });
+
     // 4. Disconnect Handler
     socket.on("disconnect", (reason) => {
       // Socket.io automatically cleans up internal room associations

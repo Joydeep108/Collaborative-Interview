@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Live Interview Room | Video & Screen Share</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+
+    body {
+      background-color: #0b0f19;
+      color: #f1f5f9;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 16px;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 1200px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    /* Auth & Setup Panel */
+    .panel {
+      background: #1e293b;
+      padding: 14px 20px;
+      border-radius: 12px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      border: 1px solid #334155;
+    }
+
+    .panel input {
+      padding: 8px 12px;
+      border-radius: 6px;
+      border: 1px solid #475569;
+      background-color: #0f172a;
+      color: #fff;
+      font-size: 13px;
+      flex: 1 1 200px;
+    }
+
+    .btn {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 6px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+    .btn:hover { opacity: 0.9; }
+    .btn-primary { background: #2563eb; color: #fff; }
+    .btn-danger { background: #dc2626; color: #fff; }
+    .btn-secondary { background: #475569; color: #fff; }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* Video Grid */
+    .video-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+      gap: 16px;
+      width: 100%;
+      min-height: 520px;
+    }
+
+    .video-card {
+      position: relative;
+      background: #000;
+      border-radius: 12px;
+      overflow: hidden;
+      border: 1px solid #334155;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      background: #000;
+    }
+
+    .video-tag {
+      position: absolute;
+      bottom: 12px;
+      left: 12px;
+      background: rgba(15, 23, 42, 0.75);
+      backdrop-filter: blur(4px);
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    /* Floating Toolbar */
+    .controls {
+      display: flex;
+      justify-content: center;
+      gap: 12px;
+      background: #1e293b;
+      padding: 12px;
+      border-radius: 12px;
+      border: 1px solid #334155;
+    }
+
+    .status-text {
+      font-size: 13px;
+      color: #94a3b8;
+    }
+  </style>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+</head>
+<body>
+
+  <div class="container">
+    <!-- Auth & Join Section -->
+    <div class="panel">
+      <input type="text" id="serverUrl" placeholder="Server URL" value="http://localhost:8080" />
+      <input type="text" id="jwtToken" placeholder="Paste your Bearer JWT Token" />
+      <input type="text" id="roomCode" placeholder="Enter Room Code (e.g., ROOM_123)" />
+      <button class="btn btn-primary" id="joinBtn" onclick="initAndJoin()">Join Interview</button>
+      <span class="status-text" id="statusLabel">Status: Not Connected</span>
+    </div>
+
+    <!-- Video Stage -->
+    <div class="video-grid">
+      <!-- Local User -->
+      <div class="video-card">
+        <video id="localVideo" autoplay playsinline muted></video>
+        <span class="video-tag" id="localRole">You (Waiting...)</span>
+      </div>
+
+      <!-- Remote User (Candidate / Interviewer) -->
+      <div class="video-card">
+        <video id="remoteVideo" autoplay playsinline></video>
+        <span class="video-tag" id="remoteRole">Remote Participant</span>
+      </div>
+    </div>
+
+    <!-- Media Controls -->
+    <div class="controls">
+      <button class="btn btn-secondary" id="toggleAudioBtn" onclick="toggleAudio()" disabled>Mute Mic</button>
+      <button class="btn btn-secondary" id="toggleVideoBtn" onclick="toggleVideo()" disabled>Stop Video</button>
+      <button class="btn btn-secondary" id="screenShareBtn" onclick="toggleScreenShare()" disabled>Share Screen</button>
+      <button class="btn btn-danger" id="hangupBtn" onclick="hangUp()" disabled>Leave Call</button>
+    </div>
+  </div>
+
+  <script>
+    let socket = null;
+    let peerConnection = null;
+    let localStream = null;
+    let screenTrack = null;
+    let isSharingScreen = false;
+    let currentRoomCode = "";
+
+    // 1. ICE Servers Configuration: Google Public STUN + Your ExpressTURN Server
+    const rtcConfig = {
+      iceServers: [
+        { urls: "stun:stun.l.google.com:19302" },
+        // {
+        //   urls: [
+        //     "turn:free.expressturn.com:3478?transport=udp",
+        //     "turn:free.expressturn.com:3478?transport=tcp"
+        //   ],
+        //   username: "000000002104294917",
+        //   credential: "nc5tXtgZ+L6QYPZ5w8KXIWow3rE="
+        // }
+      ]
+    };
+
+    function setStatus(text) {
+      document.getElementById("statusLabel").textContent = `Status: ${text}`;
+    }
+
+    async function initAndJoin() {
+      const serverUrl = document.getElementById("serverUrl").value.trim();
+      const token = document.getElementById("jwtToken").value.trim();
+      const roomCode = document.getElementById("roomCode").value.trim();
+
+      if (!token || !roomCode) {
+        alert("Please provide both a JWT Token and Room Code.");
+        return;
+      }
+
+      currentRoomCode = roomCode;
+      setStatus("Acquiring camera and microphone...");
+
+      try {
+        // Capture initial A/V stream with browser-level noise suppression enabled
+        localStream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true },
+          video: { width: { ideal: 1280 }, height: { ideal: 720 } }
+        });
+        document.getElementById("localVideo").srcObject = localStream;
+      } catch (err) {
+        alert("Microphone / Camera access denied: " + err.message);
+        setStatus("Device access denied");
+        return;
+      }
+
+      // Connect authenticated Socket.IO
+      setStatus("Authenticating socket...");
+      socket = io(serverUrl, { auth: { token } });
+
+      socket.on("connect", () => {
+        setStatus("Joining room...");
+        socket.emit("join_room", { roomCode }, (res) => {
+          if (res?.status === "ok") {
+            setStatus(`Authenticated & In Room: ${roomCode}`);
+            document.getElementById("joinBtn").disabled = true;
+            enableControls(true);
+          } else {
+            setStatus(`Failed: ${res?.message || "Room auth error"}`);
+            alert(res?.message || "Access denied.");
+          }
+        });
+      });
+
+      // Presence: When the other participant joins, initiate the WebRTC Offer
+      socket.on("user_connected", async (data) => {
+        document.getElementById("remoteRole").textContent = `${data.role.toUpperCase()} (Connected)`;
+        await createPeerConnection();
+        // Create and send SDP Offer
+        const offer = await peerConnection.createOffer();
+        await peerConnection.setLocalDescription(offer);
+        socket.emit("webrtc_offer", { roomCode: currentRoomCode, sdp: offer });
+      });
+
+      // Signaling: Received Offer -> Create and send Answer
+      socket.on("webrtc_offer", async ({ sdp }) => {
+        if (!peerConnection) await createPeerConnection();
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(sdp));
+        const answer = await peerConnection.createAnswer();
+        await peerConnection.setLocalDescription(answer);
+        socket.emit("webrtc_answer", { roomCode: currentRoomCode, sdp: answer });
+      });
+
+      // Signaling: Received Answer
+      socket.on("webrtc_answer", async ({ sdp }) => {
+        if (peerConnection) {
+          await peerConnection.setRemoteDescription(new RTCSessionDescription(sdp));
+        }
+      });
+
+      // Signaling: Remote ICE Candidate received
+      socket.on("webrtc_ice_candidate", async ({ candidate }) => {
+        if (peerConnection && candidate) {
+          try {
+            await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+          } catch (e) {
+            console.error("Error adding remote ICE candidate:", e);
+          }
+        }
+      });
+
+      // Handle Peer Hangup / Exit
+      socket.on("peer_left", () => {
+        setStatus("Remote user left the call");
+        closePeer();
+      });
+
+      socket.on("connect_error", (err) => setStatus(`Auth/Socket error: ${err.message}`));
+      socket.on("disconnect", () => setStatus("Disconnected from server"));
+    }
+
+    async function createPeerConnection() {
+      if (peerConnection) return;
+
+      peerConnection = new RTCPeerConnection(rtcConfig);
+
+      // Add local media tracks to the connection
+      localStream.getTracks().forEach((track) => {
+        peerConnection.addTrack(track, localStream);
+      });
+
+      // Listen for remote tracks and attach to remote <video>
+      peerConnection.ontrack = (event) => {
+        const [remoteStream] = event.streams;
+        document.getElementById("remoteVideo").srcObject = remoteStream;
+      };
+
+      // Send local ICE candidates to remote peer via Socket
+      peerConnection.onicecandidate = (event) => {
+        if (event.candidate) {
+          socket.emit("webrtc_ice_candidate", {
+            roomCode: currentRoomCode,
+            candidate: event.candidate
+          });
+        }
+      };
+
+      peerConnection.onconnectionstatechange = () => {
+        if (peerConnection) {
+          setStatus(`Peer State: ${peerConnection.connectionState}`);
+        }
+      };
+    }
+
+    // Controls: Mute / Unmute Audio
+    function toggleAudio() {
+      const audioTrack = localStream.getAudioTracks()[0];
+      if (!audioTrack) return;
+      audioTrack.enabled = !audioTrack.enabled;
+      document.getElementById("toggleAudioBtn").textContent = audioTrack.enabled ? "Mute Mic" : "Unmute Mic";
+    }
+
+    // Controls: Enable / Disable Camera
+    function toggleVideo() {
+      const videoTrack = localStream.getVideoTracks()[0];
+      if (!videoTrack) return;
+      videoTrack.enabled = !videoTrack.enabled;
+      document.getElementById("toggleVideoBtn").textContent = videoTrack.enabled ? "Stop Video" : "Start Video";
+    }
+
+    // Controls: Screen Sharing via getDisplayMedia
+    async function toggleScreenShare() {
+      if (!isSharingScreen) {
+        try {
+          const displayStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+          screenTrack = displayStream.getVideoTracks()[0];
+
+          // Replace camera track with screen track in active RTCPeerConnection sender
+          const sender = peerConnection.getSenders().find((s) => s.track && s.track.kind === "video");
+          if (sender) sender.replaceTrack(screenTrack);
+
+          document.getElementById("localVideo").srcObject = displayStream;
+          document.getElementById("screenShareBtn").textContent = "Stop Sharing";
+          isSharingScreen = true;
+
+          // Handle user ending screen share using browser's native floating bar
+          screenTrack.onended = () => revertCameraTrack();
+        } catch (err) {
+          console.error("Screen share canceled or error:", err);
+        }
+      } else {
+        revertCameraTrack();
+      }
+    }
+
+    function revertCameraTrack() {
+      if (screenTrack) {
+        screenTrack.stop();
+        screenTrack = null;
+      }
+      const cameraTrack = localStream.getVideoTracks()[0];
+      const sender = peerConnection?.getSenders().find((s) => s.track && s.track.kind === "video");
+      if (sender && cameraTrack) {
+        sender.replaceTrack(cameraTrack);
+      }
+      document.getElementById("localVideo").srcObject = localStream;
+      document.getElementById("screenShareBtn").textContent = "Share Screen";
+      isSharingScreen = false;
+    }
+
+    function hangUp() {
+      if (socket && currentRoomCode) {
+        socket.emit("leave_call", { roomCode: currentRoomCode });
+      }
+      closePeer();
+      setStatus("Call ended.");
+    }
+
+    function closePeer() {
+      if (peerConnection) {
+        peerConnection.close();
+        peerConnection = null;
+      }
+      document.getElementById("remoteVideo").srcObject = null;
+      document.getElementById("remoteRole").textContent = "Remote Participant";
+    }
+
+    function enableControls(enabled) {
+      document.getElementById("toggleAudioBtn").disabled = !enabled;
+      document.getElementById("toggleVideoBtn").disabled = !enabled;
+      document.getElementById("screenShareBtn").disabled = !enabled;
+      document.getElementById("hangupBtn").disabled = !enabled;
+    }
+  </script>
+</body>
+</html>
